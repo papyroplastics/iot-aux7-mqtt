@@ -23,13 +23,14 @@
 
 #define BROKER_IP ""
 #define BROKER_PORT "1883"
+#define MQTT_TOPIC "data/temperature"
 
 SemaphoreHandle_t sem;
 
 const uint8_t max_retries = 5;
 uint8_t retries = 0;
 
-void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
   if (event_base == WIFI_EVENT) {
     if (event_id == WIFI_EVENT_STA_START) {
       esp_wifi_connect();
@@ -56,68 +57,28 @@ void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, voi
   }
 }
 
+static void mqtt_event_handler(void *handler_args, 
+    esp_event_base_t base, int32_t event_id, void *event_data) {
 
-static void log_error_if_nonzero(const char *message, int error_code)
-{
-  if (error_code != 0) {
-    printf("Last error %s: 0x%x", message, error_code);
-  }
-}
-
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
-{
-  printf("Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
-  esp_mqtt_event_handle_t event = event_data;
-  esp_mqtt_client_handle_t client = event->client;
-  int msg_id;
+  esp_mqtt_event_t *event = event_data;
 
   switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
-      printf("MQTT_EVENT_CONNECTED");
-      msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 0);
-      printf("sent publish successful, msg_id=%d", msg_id);
-
-      msg_id = esp_mqtt_client_subscribe(client, "/topic/qos0", 0);
-      printf("sent subscribe successful, msg_id=%d", msg_id);
-
-      msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
-      printf("sent subscribe successful, msg_id=%d", msg_id);
-
-      msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
-      printf("sent unsubscribe successful, msg_id=%d", msg_id);
+      esp_mqtt_client_subscribe(event->client, MQTT_TOPIC, 0);
       break;
+
     case MQTT_EVENT_DISCONNECTED:
-      printf("MQTT_EVENT_DISCONNECTED");
+      printf("desconectado del broker, reconectando...\n");
+      esp_mqtt_client_reconnect(event->client);
       break;
 
-    case MQTT_EVENT_SUBSCRIBED:
-      printf("MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-      msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
-      printf("sent publish successful, msg_id=%d", msg_id);
+    case MQTT_EVENT_DATA: {
+      uint32_t *temp = (uint32_t*)event->data;
+      printf("Recived data %.*s: %lu\r\n", event->topic_len, event->topic, *temp);
       break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-      printf("MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-      break;
-    case MQTT_EVENT_PUBLISHED:
-      printf("MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-      break;
-    case MQTT_EVENT_DATA:
-      printf("MQTT_EVENT_DATA");
-      printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-      printf("DATA=%.*s\r\n", event->data_len, event->data);
-      break;
-    case MQTT_EVENT_ERROR:
-      printf("MQTT_EVENT_ERROR");
-      if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-        log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
-        log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
-        log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
-        printf("Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+    }
 
-      }
-      break;
     default:
-      printf("Other event id:%d", event->event_id);
       break;
   }
 }
@@ -136,10 +97,10 @@ void app_main() {
 
   esp_event_handler_instance_t wifi_any_evh;
 
-  esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &wifi_any_evh);
+  esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &wifi_any_evh);
 
   esp_event_handler_instance_t got_ip_evh;
-  esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, &got_ip_evh);
+  esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &got_ip_evh);
 
   esp_wifi_set_mode(WIFI_MODE_STA);
   wifi_config_t wifi_config = {
@@ -173,5 +134,4 @@ void app_main() {
 
   esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
   esp_mqtt_client_start(client);
-
 }

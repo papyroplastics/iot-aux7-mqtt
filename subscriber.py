@@ -1,10 +1,9 @@
-import random
 import time
 import paho.mqtt.client as mqtt
 
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Connected with result code {reason_code}")
-    client.subscribe("python/temperature")
+    client.subscribe("data/temperature")
 
 def on_message(client, userdata, msg):
     print(f"{msg.topic}: {int.from_bytes(msg.payload[:4], byteorder="little")}")
