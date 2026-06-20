@@ -21,9 +21,32 @@
 
 #include "credentials.h"
 
-#define BROKER_IP ""
+#define BROKER_IP "192.168.0.10"
 #define BROKER_PORT "1883"
-#define MQTT_TOPIC "data/temperature"
+#define MQTT_TOPIC "devices/+/sensor/temperature"
+
+void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+  esp_mqtt_event_t *event = event_data;
+
+  switch (event_id) {
+    case MQTT_EVENT_CONNECTED:
+      esp_mqtt_client_subscribe(event->client, MQTT_TOPIC, 0);
+      break;
+
+    case MQTT_EVENT_DISCONNECTED:
+      printf("desconectado del broker, reconectando...\n");
+      esp_mqtt_client_reconnect(event->client);
+      break;
+
+    case MQTT_EVENT_DATA: {
+      uint32_t *temp = (uint32_t *)event->data;
+      printf("%.*s: %ld\n", event->topic_len, event->topic, *temp);
+
+    default:
+      break;
+    }
+  }
+}
 
 SemaphoreHandle_t sem;
 
@@ -57,31 +80,6 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id
   }
 }
 
-static void mqtt_event_handler(void *handler_args, 
-    esp_event_base_t base, int32_t event_id, void *event_data) {
-
-  esp_mqtt_event_t *event = event_data;
-
-  switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-      esp_mqtt_client_subscribe(event->client, MQTT_TOPIC, 0);
-      break;
-
-    case MQTT_EVENT_DISCONNECTED:
-      printf("desconectado del broker, reconectando...\n");
-      esp_mqtt_client_reconnect(event->client);
-      break;
-
-    case MQTT_EVENT_DATA: {
-      uint32_t *temp = (uint32_t*)event->data;
-      printf("Recived data %.*s: %lu\r\n", event->topic_len, event->topic, *temp);
-      break;
-    }
-
-    default:
-      break;
-  }
-}
 
 void app_main() {
   sem = xSemaphoreCreateBinary();
@@ -127,11 +125,12 @@ void app_main() {
 
   // Publisher MQTT
   esp_mqtt_client_config_t mqtt_cfg = {
-    .broker.address.uri = "mqtt://"BROKER_IP":"BROKER_PORT,
+    .broker.address.uri = "mqtt://" BROKER_IP ":" BROKER_PORT,
   };
 
   esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
 
   esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+
   esp_mqtt_client_start(client);
 }
